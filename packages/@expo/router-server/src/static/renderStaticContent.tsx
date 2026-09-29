@@ -9,12 +9,17 @@ import * as Font from 'expo-font/build/server';
 import { ExpoRoot } from 'expo-router';
 import { ctx } from 'expo-router/_ctx';
 import Head from 'expo-router/head';
-import { InnerRoot, registerStaticRootComponent } from 'expo-router/internal/static';
+import {
+  collectStaticLayoutSettings,
+  InnerRoot,
+  registerStaticRootComponent,
+} from 'expo-router/internal/static';
 import React from 'react';
 import ReactDOMServer from 'react-dom/server';
 
 import { createDebug } from '../utils/debug';
 import {
+  createLayoutSettingsScriptAsString,
   createLoaderDataScriptAsString,
   injectAssetsIntoHtml,
   serializeHelmetToHtml,
@@ -80,7 +85,16 @@ function prepareRenderContext(location: URL, options?: GetStaticContentOptions) 
       }
     : null;
 
-  return { headContext, element, getStyleElement, loadedData };
+  return { headContext, element, getStyleElement, loadedData, layoutSettings: getLayoutSettings() };
+}
+
+/**
+ * The anchor settings of every layout, for the client to read when async routes are enabled and
+ * a layout module has not loaded when the route tree is built. `null` when no layout sets any.
+ */
+function getLayoutSettings(): Record<string, unknown> | null {
+  const settings = collectStaticLayoutSettings(ctx);
+  return Object.keys(settings).length ? settings : null;
 }
 
 export async function getStaticContent(
@@ -88,10 +102,8 @@ export async function getStaticContent(
   options?: GetStaticContentOptions
 ): Promise<string> {
   return Font.withServerContext(() => {
-    const { headContext, element, getStyleElement, loadedData } = prepareRenderContext(
-      location,
-      options
-    );
+    const { headContext, element, getStyleElement, loadedData, layoutSettings } =
+      prepareRenderContext(location, options);
 
     const html = ReactDOMServer.renderToString(
       <Head.Provider context={headContext}>
@@ -112,6 +124,12 @@ export async function getStaticContent(
     output = output.replace('</head>', `${fonts.join('')}</head>`);
     if (loadedData) {
       output = output.replace('</head>', `${createLoaderDataScriptAsString(loadedData)}</head>`);
+    }
+    if (layoutSettings) {
+      output = output.replace(
+        '</head>',
+        `${createLayoutSettingsScriptAsString(layoutSettings)}</head>`
+      );
     }
 
     output = injectAssetsIntoHtml(output, { assets: options?.assets, hydrate: options?.hydrate });
